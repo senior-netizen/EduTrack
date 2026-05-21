@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  HEADMASTER
+  HOD
+  TEACHER
+  BURSAR
+  LIBRARIAN
+  PARENT
+  STUDENT
+}
+
+enum StudentStatus {
+  ACTIVE
+  SUSPENDED
+  TRANSFERRED
+  WITHDRAWN
+  GRADUATED
+}
+
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  email     String?
+  country   String   @default("ZW")
+  currency  String   @default("USD")
+  users     User[]
+  students  Student[]
+  terms     Term[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  schoolId             String?
+  school               School?  @relation(fields: [schoolId], references: [id])
+  email                String   @unique
+  passwordHash         String
+  role                 UserRole
+  firstName            String
+  lastName             String
+  failedLoginAttempts  Int      @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Term {
+  id           String   @id @default(cuid())
+  schoolId      String
+  school        School   @relation(fields: [schoolId], references: [id])
+  academicYear  String
+  name          String
+  startDate     DateTime
+  endDate       DateTime
+  isActive      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([schoolId, academicYear, name])
+}
+
+model Student {
+  id           String        @id @default(cuid())
+  schoolId     String
+  school       School        @relation(fields: [schoolId], references: [id])
+  studentId    String
+  firstName    String
+  lastName     String
+  dateOfBirth  DateTime
+  gender       String
+  className    String
+  status       StudentStatus @default(ACTIVE)
+  guardianName String
+  guardianPhone String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([schoolId, studentId])
+}
