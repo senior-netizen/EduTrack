@@ -12,13 +12,13 @@ Status is based on acceptance against `edutrack-api-contracts.md` (implemented s
 
 | Module | Key endpoints/features currently available | Contract status |
 |---|---|---|
-| Auth | `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/forgot-password`, `POST /auth/reset-password`, `GET /auth/me` | Partial |
-| Schools | `POST /schools`, `GET /schools/:id` | Partial |
-| Students | `GET /students` (subset of filters), `POST /students`, `GET /students/:id`, `PUT /students/:id`, status change | Partial |
-| Academics | Create-only endpoints for terms/classes/subjects | Partial |
-| Attendance | `POST /attendance/bulk` | Partial |
-| Exams | `POST /exams`, exam-result upsert | Partial |
-| Fees | Invoice creation and payment recording | Partial |
+| Auth | `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/forgot-password`, `POST /auth/reset-password`, `GET /auth/me` | Fully implemented |
+| Schools | `POST /schools`, `GET /schools/:id` | Fully implemented |
+| Students | `GET /students`, `POST /students`, `GET /students/:id`, `PUT /students/:id`, `POST /students/:id/status`, `POST /students/bulk-import`, `GET /students/:id/report-card/:termId` | Fully implemented |
+| Academics | Full CRUD/list for terms/classes/subjects plus `GET /classes/:id/students` | Fully implemented |
+| Attendance | `POST /attendance`, `POST /attendance/bulk`, `GET /attendance/student/:studentId`, `GET /attendance/class/:classId` plus analytics endpoints | Fully implemented |
+| Exams | `POST /exams`, `POST /exams/:id/results`, `GET /exams/:id/results`, `POST /exams/:id/publish` and extended exam routes | Fully implemented |
+| Fees | Fee structures, invoice generation, payment recording/receipts, student fee account, arrears + notify endpoints | Fully implemented |
 
 ## Known Remaining Gaps
 For the detailed gap breakdown and completion checklist, see [`implementation-gap-report.md`](implementation-gap-report.md).
