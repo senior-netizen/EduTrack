@@ -86,6 +86,8 @@ model User {
   lockedUntil          DateTime?
   lastLogin            DateTime?
   studentsAsParent     StudentGuardian[]
+  passwordResetTokens  PasswordResetToken[]
+  refreshTokens        RefreshToken[]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -163,6 +165,10 @@ model Student {
   dateOfBirth    DateTime
   gender         String
   status         StudentStatus     @default(ACTIVE)
+  address        String?
+  medicalNotes   String?
+  documents      Json?
+  classHistory   Json?
   guardians      StudentGuardian[]
   attendance     AttendanceRecord[]
   examResults    ExamResult[]
@@ -181,8 +187,13 @@ model StudentGuardian {
   userId         String?
   parentUser     User?    @relation(fields: [userId], references: [id])
   guardianName   String
+  firstName      String
+  lastName       String
   guardianPhone  String
   relationship   String?
+  email          String?
+  isPrimary      Boolean  @default(false)
+  hasPortalAccess Boolean @default(false)
 }
 
 model AttendanceRecord {
@@ -198,6 +209,10 @@ model AttendanceRecord {
   student     Student          @relation(fields: [studentId], references: [id])
 
   @@unique([studentId, date])
+  @@index([schoolId, date])
+  @@index([schoolId, classId, date])
+  @@index([schoolId, studentId, date])
+  @@index([schoolId, termId, date])
 }
 
 model Exam {
@@ -313,4 +328,33 @@ model Payment {
   createdAt     DateTime @default(now())
 
   @@unique([schoolId, reference])
+}
+
+
+model TimetableEntry {
+  id        String   @id @default(cuid())
+  schoolId  String
+  classId   String
+  subjectId String
+  teacherId String?
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  room      String?
+  createdAt DateTime @default(now())
+
+  @@index([schoolId, classId, dayOfWeek])
+}
+
+model CurriculumItem {
+  id         String   @id @default(cuid())
+  schoolId   String
+  classId    String
+  subjectId  String
+  termId     String?
+  topic      String
+  objectives String[]
+  createdAt  DateTime @default(now())
+
+  @@index([schoolId, classId, subjectId])
 }

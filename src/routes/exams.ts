@@ -9,7 +9,7 @@ export async function examRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
     const schema = z.object({ termId: z.string(), name: z.string(), startDate: z.string(), endDate: z.string(), weight: z.number().min(0).max(100) });
     const parsed = schema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
     const termCheck = await ensureTermInSchool(app, reply, parsed.data.termId, jwt.schoolId);
     if (!termCheck.ok) return termCheck.response;
 
@@ -21,7 +21,7 @@ export async function examRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
     const schema = z.object({ examId: z.string(), subjectId: z.string(), maxMarks: z.number().positive(), paperCode: z.string().optional(), examDate: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(), venue: z.string().optional() });
     const p = schema.safeParse(request.body);
-    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    if (!p.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(p.error.issues)));
     const examCheck = await ensureExamInSchool(app, reply, p.data.examId, jwt.schoolId);
     if (!examCheck.ok) return examCheck.response;
     const paper = await app.prisma.examPaper.create({ data: { ...p.data, examDate: p.data.examDate ? new Date(p.data.examDate) : undefined } });
