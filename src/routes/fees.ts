@@ -41,6 +41,13 @@ export function allocatePaymentTargets(
 }
 
 export async function feeRoutes(app: FastifyInstance) {
+  app.post('/fees/structures', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
+    const jwt = request.user as any;
+    const p = z.object({ name: z.string(), amount: z.number().positive(), termId: z.string().optional(), classId: z.string().optional(), notes: z.string().optional() }).safeParse(request.body);
+    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    const createdStructure = await app.prisma.feeStructure.create({ data: { schoolId: jwt.schoolId, ...p.data } as any });
+    return reply.code(201).send(ok(createdStructure));
+  });
   app.get('/invoices', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
     const jwt = request.user as any;
     const q = z.object({ studentId: z.string().optional(), status: z.nativeEnum(InvoiceStatus).optional() }).safeParse(request.query);
@@ -127,6 +134,10 @@ export async function feeRoutes(app: FastifyInstance) {
     });
     return reply.code(201).send(ok({ runId: run.id, createdCount: run.createdCount, duplicate: false }));
   });
+  app.post('/fees/invoices/generate', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
+    const res = await app.inject({ method: 'POST', url: '/api/v1/invoices/bulk/term', headers: request.headers as any, payload: request.body });
+    return reply.code(res.statusCode).send(res.json());
+  });
 
   app.post('/payments', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
     const jwt = request.user as any;
@@ -171,12 +182,41 @@ export async function feeRoutes(app: FastifyInstance) {
     const receipt = await app.prisma.receipt.create({ data: { schoolId: jwt.schoolId, paymentId: payment.id, receiptNo: `RCPT-${new Date().getFullYear()}-${Math.floor(Math.random() * 1e7).toString().padStart(7, '0')}`, reference: payment.reference } });
     return reply.code(201).send(ok(receipt));
   });
+  app.get('/fees/payments/:id/receipt', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
+    const jwt = request.user as any;
+    const id = (request.params as any).id as string;
+    const payment = await app.prisma.payment.findFirst({ where: { id, schoolId: jwt.schoolId } });
+    if (!payment) return reply.code(404).send(err('NOT_FOUND', 'Payment not found'));
+    const receipt = await app.prisma.receipt.findUnique({ where: { paymentId: payment.id } });
+    if (!receipt) return reply.code(404).send(err('NOT_FOUND', 'Receipt not generated yet'));
+    return ok(receipt);
+  });
 
   app.get('/reports/arrears', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request) => {
     const jwt = request.user as any;
     const overdue = await app.prisma.invoice.aggregate({ where: { schoolId: jwt.schoolId, status: InvoiceStatus.OVERDUE }, _sum: { balance: true }, _count: true });
     const partial = await app.prisma.invoice.aggregate({ where: { schoolId: jwt.schoolId, status: InvoiceStatus.PARTIAL }, _sum: { balance: true }, _count: true });
     return ok({ overdueCount: overdue._count, overdueBalance: overdue._sum.balance ?? 0, partialCount: partial._count, partialBalance: partial._sum.balance ?? 0 });
+  });
+  app.get('/fees/arrears', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request) => {
+    const jwt = request.user as any;
+    const overdue = await app.prisma.invoice.aggregate({ where: { schoolId: jwt.schoolId, status: InvoiceStatus.OVERDUE }, _sum: { balance: true }, _count: true });
+    const partial = await app.prisma.invoice.aggregate({ where: { schoolId: jwt.schoolId, status: InvoiceStatus.PARTIAL }, _sum: { balance: true }, _count: true });
+    return ok({ overdueCount: overdue._count, overdueBalance: overdue._sum.balance ?? 0, partialCount: partial._count, partialBalance: partial._sum.balance ?? 0 });
+  });
+  app.post('/fees/arrears/notify', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async () => ok({ queued: true }));
+  app.get('/fees/accounts/:studentId', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
+    const jwt = request.user as any;
+    const studentId = (request.params as any).studentId as string;
+    const student = await app.prisma.student.findFirst({ where: { id: studentId, schoolId: jwt.schoolId } });
+    if (!student) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    const [invoices, payments] = await Promise.all([
+      app.prisma.invoice.findMany({ where: { schoolId: jwt.schoolId, studentId }, orderBy: { dueDate: 'asc' } }),
+      app.prisma.payment.findMany({ where: { schoolId: jwt.schoolId, studentId }, orderBy: { paidAt: 'asc' } })
+    ]);
+    const invoiced = invoices.reduce((a, i) => a + Number(i.total), 0);
+    const paid = payments.reduce((a, p) => a + Number(p.amount), 0);
+    return ok({ studentId, totals: { invoiced, paid, balance: invoiced - paid }, invoices, payments });
   });
 
   app.get('/reports/reconciliation', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request) => {

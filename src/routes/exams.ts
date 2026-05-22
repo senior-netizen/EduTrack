@@ -89,11 +89,25 @@ export async function examRoutes(app: FastifyInstance) {
     const result = await app.prisma.examResult.upsert({ where: { examPaperId_studentId: { examPaperId: p.data.examPaperId, studentId: p.data.studentId } }, update: { marks: p.data.marks, ...gradeData, weightedScore }, create: { schoolId: jwt.schoolId, ...p.data, ...gradeData, weightedScore } });
     return reply.code(201).send(ok(result));
   });
+  app.post('/exams/:id/results', { preHandler: [app.authenticate, app.authorize(['TEACHER', 'HOD', 'HEADMASTER'])] }, async (request, reply) => {
+    const examId = (request.params as any).id;
+    const b = z.object({ examPaperId: z.string(), studentId: z.string(), marks: z.number() }).safeParse(request.body);
+    if (!b.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', b.error.issues));
+    const payload = { examId, ...b.data };
+    const result = await app.prisma.examResult.upsert({ where: { examPaperId_studentId: { examPaperId: payload.examPaperId, studentId: payload.studentId } }, update: { marks: payload.marks }, create: { schoolId: (request.user as any).schoolId, ...payload, weightedScore: payload.marks } });
+    return reply.code(201).send(ok(result));
+  });
 
   app.get('/exam-results', { preHandler: [app.authenticate] }, async (request) => {
     const jwt = request.user as any;
     const q = request.query as any;
     const results = await app.prisma.examResult.findMany({ where: { schoolId: jwt.schoolId, ...(q.studentId ? { studentId: q.studentId } : {}), ...(q.examId ? { examId: q.examId } : {}), ...(q.classId ? { student: { classId: q.classId } } : {}) }, include: { student: true, exam: true } });
+    return ok(results);
+  });
+  app.get('/exams/:id/results', { preHandler: [app.authenticate] }, async (request) => {
+    const jwt = request.user as any;
+    const examId = (request.params as any).id;
+    const results = await app.prisma.examResult.findMany({ where: { schoolId: jwt.schoolId, examId }, include: { student: true, exam: true } });
     return ok(results);
   });
 
@@ -124,6 +138,12 @@ export async function examRoutes(app: FastifyInstance) {
     if (!current || current.schoolId !== jwt.schoolId) return reply.code(404).send(err('NOT_FOUND', 'Exam result not found'));
     const updated = await app.prisma.examResult.update({ where: { id }, data: { moderationStatus: p.data.status, signedOffBy: jwt.userId, signedOffAt: new Date() } });
     return ok(updated);
+  });
+  app.post('/exams/:id/publish', { preHandler: [app.authenticate, app.authorize(['HEADMASTER'])] }, async (request, reply) => {
+    const jwt = request.user as any;
+    const examId = (request.params as any).id;
+    await app.prisma.examResult.updateMany({ where: { schoolId: jwt.schoolId, examId }, data: { moderationStatus: 'APPROVED', signedOffBy: jwt.userId, signedOffAt: new Date() } });
+    return ok({ examId, published: true });
   });
 
   app.get('/exam-timetable', { preHandler: [app.authenticate] }, async (request) => {

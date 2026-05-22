@@ -230,4 +230,48 @@ export async function studentRoutes(app: FastifyInstance) {
     const updated = await app.prisma.student.update({ where: { id: s.id }, data: { status: parsed.data.status } });
     return ok({ id: updated.id, status: updated.status, transferLetterUrl: updated.status === 'TRANSFERRED' ? `https://example.invalid/transfer-letter-${updated.studentId}.pdf` : null });
   });
+
+  app.post('/students/bulk-import', { preHandler: [app.authenticate, app.authorize([...studentWriteRoles])] }, async (request, reply) => {
+    const schema = z.object({ students: z.array(createStudentSchema).min(1) });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
+    const jwt = request.user as any;
+
+    const classIds = [...new Set(parsed.data.students.map((s) => s.classId))];
+    for (const classId of classIds) {
+      const classCheck = await ensureClassInSchool(app, reply, classId, jwt.schoolId);
+      if (!classCheck.ok) return classCheck.response;
+    }
+
+    const year = new Date().getFullYear();
+    const baseCount = await app.prisma.student.count({ where: { schoolId: jwt.schoolId } });
+    const createdStudents = await app.prisma.$transaction(parsed.data.students.map((item, index) => app.prisma.student.create({
+      data: {
+        firstName: item.firstName,
+        lastName: item.lastName,
+        dateOfBirth: new Date(item.dateOfBirth),
+        gender: item.gender,
+        address: item.address,
+        medicalNotes: item.medicalNotes,
+        classId: item.classId,
+        schoolId: jwt.schoolId,
+        studentId: `SCH-${year}-${String(baseCount + index + 1).padStart(4, '0')}`,
+        status: 'ACTIVE',
+        guardians: { create: item.guardians.map((g) => ({ firstName: g.firstName, lastName: g.lastName, guardianName: `${g.firstName} ${g.lastName}`, guardianPhone: g.phone, relationship: g.relationship, email: g.email, isPrimary: g.isPrimary ?? false, hasPortalAccess: g.hasPortalAccess ?? false })) }
+      }
+    })));
+    return reply.code(201).send(created({ imported: createdStudents.length, studentIds: createdStudents.map((s) => s.id) }));
+  });
+
+  app.get('/students/:id/report-card/:termId', { preHandler: [app.authenticate, app.authorize([...studentReadRoles])] }, async (request, reply) => {
+    const jwt = request.user as any;
+    const { id, termId } = request.params as { id: string; termId: string };
+    const student = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId }, select: { id: true } });
+    if (!student) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
+    const term = await app.prisma.term.findFirst({ where: { id: termId, schoolId: jwt.schoolId }, select: { id: true } });
+    if (!term) return reply.code(404).send(fail('NOT_FOUND', 'Term not found'));
+    const results = await app.prisma.examResult.findMany({ where: { schoolId: jwt.schoolId, studentId: id, exam: { termId } }, include: { exam: true, examPaper: true } });
+    const total = results.reduce((acc, r) => acc + Number(r.weightedScore ?? 0), 0);
+    return ok({ studentId: id, termId, totalWeightedScore: total, subjects: results, generatedAt: new Date().toISOString() });
+  });
 }
