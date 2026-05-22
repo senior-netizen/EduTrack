@@ -1,8 +1,104 @@
 import { randomBytes } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
+import { UserRole } from '@prisma/client';
 import { z } from 'zod';
-import { created, fail, mapZodIssues, ok } from '../utils/http';
+import { JwtUser } from '../types/auth';
+import { err, ok } from '../utils/http';
+
+const schoolResponseSchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  code: z.string(),
+  address: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  country: z.string(),
+  currency: z.string(),
+  isActive: z.boolean(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  stats: z.object({
+    students: z.number(),
+    activeStudents: z.number(),
+    classes: z.number(),
+    teachers: z.number()
+  }),
+  activeTerm: z.object({
+    id: z.string(),
+    academicYear: z.string(),
+    name: z.string(),
+    startDate: z.date(),
+    endDate: z.date()
+  }).nullable()
+});
+
+type SchoolWithActiveTerm = Awaited<ReturnType<FastifyInstance['prisma']['school']['findUnique']>> & {
+  terms?: Array<{ id: string; academicYear: string; name: string; startDate: Date; endDate: Date }>;
+};
+
+export async function getSchoolResponseDto(app: FastifyInstance, schoolId: string) {
+  const school = await app.prisma.school.findUnique({
+    where: { id: schoolId },
+    include: {
+      terms: {
+        where: { isActive: true },
+        orderBy: { startDate: 'desc' },
+        take: 1,
+        select: { id: true, academicYear: true, name: true, startDate: true, endDate: true }
+      }
+    }
+  }) as SchoolWithActiveTerm | null;
+
+  if (!school) return null;
+
+  const [students, activeStudents, classes, teachers] = await Promise.all([
+    app.prisma.student.aggregate({ where: { schoolId }, _count: { _all: true } }),
+    app.prisma.student.aggregate({ where: { schoolId, status: 'ACTIVE' }, _count: { _all: true } }),
+    app.prisma.class.aggregate({ where: { schoolId }, _count: { _all: true } }),
+    app.prisma.user.aggregate({ where: { schoolId, role: 'TEACHER', isActive: true }, _count: { _all: true } })
+  ]);
+
+  return schoolResponseSchema.parse({
+    id: school.id,
+    name: school.name,
+    code: school.code,
+    address: school.address,
+    phone: school.phone,
+    email: school.email,
+    country: school.country,
+    currency: school.currency,
+    isActive: school.isActive,
+    createdAt: school.createdAt,
+    updatedAt: school.updatedAt,
+    stats: {
+      students: students._count._all,
+      activeStudents: activeStudents._count._all,
+      classes: classes._count._all,
+      teachers: teachers._count._all
+    },
+    activeTerm: school.terms?.[0] ?? null
+  });
+}
+
+function isPrivilegedRole(role: UserRole) {
+  return role === 'SUPER_ADMIN';
+}
+
+function isOwnSchoolRole(role: UserRole) {
+  return role === 'SCHOOL_ADMIN' || role === 'HEADMASTER' || role === 'HOD' || role === 'BURSAR' || role === 'LIBRARIAN' || role === 'TEACHER';
+}
+
+export function resolveSchoolIdForRequest(jwt: JwtUser, explicitSchoolId?: string) {
+  if (explicitSchoolId) {
+    if (isPrivilegedRole(jwt.role)) return explicitSchoolId;
+    if (jwt.schoolId === explicitSchoolId && isOwnSchoolRole(jwt.role)) return explicitSchoolId;
+    return null;
+  }
+
+  if (isOwnSchoolRole(jwt.role) && jwt.schoolId) return jwt.schoolId;
+  return null;
+}
 
 export async function schoolRoutes(app: FastifyInstance) {
   app.post('/schools', { preHandler: [app.authenticate, app.authorize(['SUPER_ADMIN'])] }, async (request, reply) => {
@@ -50,9 +146,23 @@ export async function schoolRoutes(app: FastifyInstance) {
   });
 
   app.get('/schools/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const jwt = request.user as JwtUser;
     const { id } = request.params as { id: string };
-    const school = await app.prisma.school.findUnique({ where: { id } });
-    if (!school) return reply.code(404).send(fail('NOT_FOUND', 'School not found'));
+    const schoolId = resolveSchoolIdForRequest(jwt, id);
+    if (!schoolId) return reply.code(403).send(err('FORBIDDEN', 'Insufficient permissions'));
+
+    const school = await getSchoolResponseDto(app, schoolId);
+    if (!school) return reply.code(404).send(err('NOT_FOUND', 'School not found'));
+    return ok(school);
+  });
+
+  app.get('/schools/me', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const jwt = request.user as JwtUser;
+    const schoolId = resolveSchoolIdForRequest(jwt);
+    if (!schoolId) return reply.code(403).send(err('FORBIDDEN', 'Insufficient permissions'));
+
+    const school = await getSchoolResponseDto(app, schoolId);
+    if (!school) return reply.code(404).send(err('NOT_FOUND', 'School not found'));
     return ok(school);
   });
 }
