@@ -286,29 +286,30 @@ model Payment {
 }
 
 
-model PasswordResetToken {
+model TimetableEntry {
   id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  tokenHash String   @unique
-  expiresAt DateTime
-  usedAt    DateTime?
+  schoolId  String
+  classId   String
+  subjectId String
+  teacherId String?
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  room      String?
   createdAt DateTime @default(now())
 
-  @@index([userId])
-  @@index([expiresAt])
+  @@index([schoolId, classId, dayOfWeek])
 }
 
-model RefreshToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  tokenId   String   @unique
-  tokenHash String
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime @default(now())
+model CurriculumItem {
+  id         String   @id @default(cuid())
+  schoolId   String
+  classId    String
+  subjectId  String
+  termId     String?
+  topic      String
+  objectives String[]
+  createdAt  DateTime @default(now())
 
-  @@index([userId])
-  @@index([expiresAt])
+  @@index([schoolId, classId, subjectId])
 }
