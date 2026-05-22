@@ -6,14 +6,22 @@ This project now implements a broad v1 backend surface aligned with:
 - `edutrack-db-schema.md`
 - `edutrack-api-contracts.md`
 
-## Implemented Modules
-- Auth: login, logout, me
-- Schools: create, get by id
-- Students: list/filter, enroll
-- Academics: terms, classes, subjects
-- Attendance: bulk attendance entry
-- Exams: create exam, upsert exam result
-- Fees: create invoices, record payments
+## Module Status (Contract-Aware)
+
+Status is based on acceptance against `edutrack-api-contracts.md` (implemented surface + response/behavior alignment).
+
+| Module | Key endpoints/features currently available | Contract status |
+|---|---|---|
+| Auth | `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/forgot-password`, `POST /auth/reset-password`, `GET /auth/me` | Partial |
+| Schools | `POST /schools`, `GET /schools/:id` | Partial |
+| Students | `GET /students` (subset of filters), `POST /students`, `GET /students/:id`, `PUT /students/:id`, status change | Partial |
+| Academics | Create-only endpoints for terms/classes/subjects | Partial |
+| Attendance | `POST /attendance/bulk` | Partial |
+| Exams | `POST /exams`, exam-result upsert | Partial |
+| Fees | Invoice creation and payment recording | Partial |
+
+## Known Remaining Gaps
+For the detailed gap breakdown and completion checklist, see [`implementation-gap-report.md`](implementation-gap-report.md).
 
 ## API Base
 - `http://localhost:4000/api/v1`
