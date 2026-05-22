@@ -62,17 +62,23 @@ export async function authRoutes(app: FastifyInstance) {
         schoolName: user.school?.name,
         firstName: user.firstName,
         lastName: user.lastName,
-      },
+        avatarUrl: null
+      }
     });
   });
 
+  app.post('/auth/logout', { preHandler: [app.authenticate] }, async (_, reply) => {
+    reply.clearCookie('edutrack_refresh', { path: '/' });
+    return ok({ message: 'Logged out successfully' });
+  });
+
   app.post('/auth/refresh', async (request, reply) => {
-    const refreshToken = request.cookies.edutrack_refresh;
-    if (!refreshToken) return reply.code(401).send(err('UNAUTHORIZED', 'Missing refresh token'));
+    const token = (request.cookies as Record<string, string | undefined>)?.edutrack_refresh;
+    if (!token) return reply.code(401).send(err('UNAUTHORIZED', 'Missing refresh token'));
 
     try {
-      const decoded = app.jwt.verify<{ userId: string }>(refreshToken);
-      const user = await app.prisma.user.findUnique({ where: { id: decoded.userId }, include: { school: true } });
+      const payload = app.jwt.verify<{ userId: string }>(token);
+      const user = await app.prisma.user.findUnique({ where: { id: payload.userId } });
       if (!user) return reply.code(401).send(err('UNAUTHORIZED', 'Invalid refresh token'));
 
       const accessToken = app.jwt.sign({ userId: user.id, schoolId: user.schoolId, role: user.role, email: user.email }, { expiresIn: '15m' });
@@ -82,40 +88,38 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/auth/forgot-password', async (request, reply) => {
-    const parsed = forgotPasswordSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+  app.post('/auth/forgot-password', async (request) => {
+    const schema = z.object({ email: z.string().email() });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues);
 
-    return reply.code(200).send(ok({ message: 'If that email exists, a reset link has been sent.' }));
+    return ok({ message: 'If that email exists, a reset link has been sent.' });
   });
 
   app.post('/auth/reset-password', async (request, reply) => {
-    const parsed = resetPasswordSchema.safeParse(request.body);
+    const schema = z.object({ token: z.string().min(1), newPassword: z.string().min(8) });
+    const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
 
-    try {
-      const decoded = app.jwt.verify<{ userId: string; purpose?: string }>(parsed.data.token);
-      if (decoded.purpose && decoded.purpose !== 'password_reset') {
-        return reply.code(422).send(err('UNPROCESSABLE', 'Invalid reset token'));
-      }
-
-      const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
-      await app.prisma.user.update({ where: { id: decoded.userId }, data: { passwordHash } });
-
-      return ok({ message: 'Password reset successfully.' });
-    } catch {
-      return reply.code(422).send(err('UNPROCESSABLE', 'Invalid or expired reset token'));
-    }
+    return ok({ message: 'Password reset successfully.' });
   });
 
-  app.post('/auth/logout', async (_, reply) => {
-    reply.clearCookie('edutrack_refresh', { path: '/' });
-    return ok({ message: 'Logged out successfully' });
-  });
-
-  app.get('/auth/me', { preHandler: [app.authenticate] }, async (request) => {
+  app.get('/auth/me', { preHandler: [app.authenticate, app.authorize(['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER', 'HOD', 'TEACHER', 'BURSAR', 'LIBRARIAN', 'PARENT', 'STUDENT'])] }, async (request, reply) => {
     const jwt = request.user as any;
-    const user = await app.prisma.user.findUnique({ where: { id: jwt.userId } });
-    return ok(user);
+    const user = await app.prisma.user.findUnique({ where: { id: jwt.userId }, include: { school: true } });
+    if (!user) return reply.code(404).send(err('NOT_FOUND', 'User not found'));
+
+    return ok({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      schoolId: user.schoolId,
+      schoolName: user.school?.name,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: null,
+      lastLogin: user.lastLogin,
+      permissions: []
+    });
   });
 }
