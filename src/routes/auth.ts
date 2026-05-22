@@ -24,30 +24,22 @@ export async function authRoutes(app: FastifyInstance) {
     const user = await app.prisma.user.findUnique({ where: { email: parsed.data.email }, include: { school: true } });
     if (!user) return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid email or password'));
 
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return reply.code(429).send(fail('RATE_LIMITED', 'Too many failed login attempts. Try again later.'));
+    const loginState = await app.redisSessionState.getLoginAttempt(parsed.data.email);
+    if (loginState.lockedUntil && loginState.lockedUntil > Date.now()) {
+      return reply.code(429).send(err('RATE_LIMITED', 'Too many failed login attempts. Try again later.'));
     }
 
     const passwordValid = await bcrypt.compare(parsed.data.password, user.passwordHash);
     if (!passwordValid) {
-      const nextFailedAttempts = user.failedLoginAttempts + 1;
+      const nextFailedAttempts = loginState.attempts + 1;
       const lockAccount = nextFailedAttempts >= MAX_LOGIN_ATTEMPTS;
-
-      await app.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: lockAccount ? 0 : nextFailedAttempts,
-          lockedUntil: lockAccount ? new Date(Date.now() + LOCKOUT_WINDOW_MS) : null,
-        },
-      });
+      await app.redisSessionState.setLoginAttempt(parsed.data.email, { attempts: lockAccount ? 0 : nextFailedAttempts, lockedUntil: lockAccount ? Date.now() + LOCKOUT_WINDOW_MS : null }, Math.ceil(LOCKOUT_WINDOW_MS / 1000));
 
       return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid email or password'));
     }
 
-    await app.prisma.user.update({
-      where: { id: user.id },
-      data: { failedLoginAttempts: 0, lockedUntil: null, lastLogin: new Date() },
-    });
+    await app.redisSessionState.clearLoginAttempt(parsed.data.email);
+    await app.prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
     const accessToken = app.jwt.sign({ userId: user.id, schoolId: user.schoolId, role: user.role, email: user.email }, { expiresIn: '15m' });
     const refreshJti = generateTokenId();
