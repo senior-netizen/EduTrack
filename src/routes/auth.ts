@@ -3,14 +3,50 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { err, ok } from '../utils/http';
 
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  rememberMe: z.boolean().optional(),
+});
+
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+const resetPasswordSchema = z.object({ token: z.string().min(1), newPassword: z.string().min(8) });
+
+const MAX_LOGIN_ATTEMPTS = 10;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (request, reply) => {
-    const schema = z.object({ email: z.string().email(), password: z.string().min(8), rememberMe: z.boolean().optional() });
-    const parsed = schema.safeParse(request.body);
+    const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
 
     const user = await app.prisma.user.findUnique({ where: { email: parsed.data.email }, include: { school: true } });
-    if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) return reply.code(401).send(err('UNAUTHORIZED', 'Invalid email or password'));
+    if (!user) return reply.code(401).send(err('UNAUTHORIZED', 'Invalid email or password'));
+
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      return reply.code(429).send(err('RATE_LIMITED', 'Too many failed login attempts. Try again later.'));
+    }
+
+    const passwordValid = await bcrypt.compare(parsed.data.password, user.passwordHash);
+    if (!passwordValid) {
+      const nextFailedAttempts = user.failedLoginAttempts + 1;
+      const lockAccount = nextFailedAttempts >= MAX_LOGIN_ATTEMPTS;
+
+      await app.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: lockAccount ? 0 : nextFailedAttempts,
+          lockedUntil: lockAccount ? new Date(Date.now() + LOCKOUT_WINDOW_MS) : null,
+        },
+      });
+
+      return reply.code(401).send(err('UNAUTHORIZED', 'Invalid email or password'));
+    }
+
+    await app.prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null, lastLogin: new Date() },
+    });
 
     const accessToken = app.jwt.sign({ userId: user.id, schoolId: user.schoolId, role: user.role, email: user.email }, { expiresIn: '15m' });
     const refreshToken = app.jwt.sign({ userId: user.id }, { expiresIn: parsed.data.rememberMe ? '30d' : '7d' });
