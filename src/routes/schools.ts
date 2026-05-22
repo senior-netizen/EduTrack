@@ -104,7 +104,7 @@ export async function schoolRoutes(app: FastifyInstance) {
   app.post('/schools', { preHandler: [app.authenticate, app.authorize(['SUPER_ADMIN'])] }, async (request, reply) => {
     const schema = z.object({ name: z.string().min(2), code: z.string().min(2), address: z.string().optional(), phone: z.string().optional(), email: z.string().email().optional(), country: z.string().default('ZW'), currency: z.string().default('USD'), adminEmail: z.string().email(), adminFirstName: z.string(), adminLastName: z.string() });
     const parsed = schema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
     const data = parsed.data;
 
     const temporaryPassword = randomBytes(12).toString('base64url');
@@ -129,7 +129,7 @@ export async function schoolRoutes(app: FastifyInstance) {
       return { school: createdSchool, admin: createdAdmin };
     });
 
-    return reply.code(201).send(ok({
+    return reply.code(201).send(created({
       ...school,
       admin: {
         id: admin.id,
