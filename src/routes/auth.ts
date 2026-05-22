@@ -19,13 +19,13 @@ const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
 
     const user = await app.prisma.user.findUnique({ where: { email: parsed.data.email }, include: { school: true } });
-    if (!user) return reply.code(401).send(err('UNAUTHORIZED', 'Invalid email or password'));
+    if (!user) return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid email or password'));
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      return reply.code(429).send(err('RATE_LIMITED', 'Too many failed login attempts. Try again later.'));
+      return reply.code(429).send(fail('RATE_LIMITED', 'Too many failed login attempts. Try again later.'));
     }
 
     const passwordValid = await bcrypt.compare(parsed.data.password, user.passwordHash);
@@ -41,7 +41,7 @@ export async function authRoutes(app: FastifyInstance) {
         },
       });
 
-      return reply.code(401).send(err('UNAUTHORIZED', 'Invalid email or password'));
+      return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid email or password'));
     }
 
     await app.prisma.user.update({
@@ -88,7 +88,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/refresh', async (request, reply) => {
     const token = (request.cookies as Record<string, string | undefined>)?.edutrack_refresh;
-    if (!token) return reply.code(401).send(err('UNAUTHORIZED', 'Missing refresh token'));
+    if (!token) return reply.code(401).send(fail('UNAUTHORIZED', 'Missing refresh token'));
 
     try {
       const payload = app.jwt.verify<{ userId: string; jti: string }>(token, { secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret' } as any);
@@ -98,7 +98,7 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       const user = await app.prisma.user.findUnique({ where: { id: payload.userId } });
-      if (!user) return reply.code(401).send(err('UNAUTHORIZED', 'Invalid refresh token'));
+      if (!user) return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid refresh token'));
 
       await app.prisma.refreshToken.update({ where: { tokenId: payload.jti }, data: { revokedAt: new Date() } });
 
@@ -110,7 +110,7 @@ export async function authRoutes(app: FastifyInstance) {
       const accessToken = app.jwt.sign({ userId: user.id, schoolId: user.schoolId, role: user.role, email: user.email }, { expiresIn: '15m' });
       return ok({ accessToken });
     } catch {
-      return reply.code(401).send(err('UNAUTHORIZED', 'Invalid refresh token'));
+      return reply.code(401).send(fail('UNAUTHORIZED', 'Invalid refresh token'));
     }
   });
 
@@ -150,7 +150,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/me', { preHandler: [app.authenticate, app.authorize(['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER', 'HOD', 'TEACHER', 'BURSAR', 'LIBRARIAN', 'PARENT', 'STUDENT'])] }, async (request, reply) => {
     const jwt = request.user as any;
     const user = await app.prisma.user.findUnique({ where: { id: jwt.userId }, include: { school: true } });
-    if (!user) return reply.code(404).send(err('NOT_FOUND', 'User not found'));
+    if (!user) return reply.code(404).send(fail('NOT_FOUND', 'User not found'));
 
     return ok({
       id: user.id,
