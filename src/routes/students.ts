@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { err, ok } from '../utils/http';
+import { ensureClassInSchool } from '../utils/schoolScope';
 
 const studentReadRoles = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER', 'HOD', 'TEACHER', 'BURSAR'] as const;
 const studentWriteRoles = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER'] as const;
@@ -66,18 +67,8 @@ export async function studentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
 
     const jwt = request.user as any;
-
-    const existing = await app.prisma.student.findFirst({
-      where: {
-        schoolId: jwt.schoolId,
-        firstName: parsed.data.firstName,
-        lastName: parsed.data.lastName,
-        dateOfBirth: new Date(parsed.data.dateOfBirth)
-      }
-    });
-    if (existing) {
-      return reply.code(409).send(err('CONFLICT', 'A student with this name and date of birth already exists.', [{ existingStudentId: existing.studentId }]));
-    }
+    const classCheck = await ensureClassInSchool(app, reply, parsed.data.classId, jwt.schoolId);
+    if (!classCheck.ok) return classCheck.response;
 
     const year = new Date().getFullYear();
     const count = await app.prisma.student.count({ where: { schoolId: jwt.schoolId } });
