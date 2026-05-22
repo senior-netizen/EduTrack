@@ -1,4 +1,6 @@
+import { randomBytes } from 'crypto';
 import { FastifyInstance } from 'fastify';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { err, ok } from '../utils/http';
 
@@ -8,8 +10,43 @@ export async function schoolRoutes(app: FastifyInstance) {
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
     const data = parsed.data;
-    const school = await app.prisma.school.create({ data: { name: data.name, code: data.code, address: data.address, phone: data.phone, email: data.email, country: data.country, currency: data.currency } });
-    return reply.code(201).send(ok(school));
+
+    const temporaryPassword = randomBytes(12).toString('base64url');
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+    const { school, admin } = await app.prisma.$transaction(async (tx: any) => {
+      const createdSchool = await tx.school.create({
+        data: { name: data.name, code: data.code, address: data.address, phone: data.phone, email: data.email, country: data.country, currency: data.currency }
+      });
+
+      const createdAdmin = await tx.user.create({
+        data: {
+          schoolId: createdSchool.id,
+          email: data.adminEmail,
+          firstName: data.adminFirstName,
+          lastName: data.adminLastName,
+          role: 'SCHOOL_ADMIN',
+          passwordHash
+        }
+      });
+
+      return { school: createdSchool, admin: createdAdmin };
+    });
+
+    return reply.code(201).send(ok({
+      ...school,
+      admin: {
+        id: admin.id,
+        email: admin.email,
+        firstName: admin.firstName,
+        lastName: admin.lastName,
+        role: admin.role,
+        schoolId: admin.schoolId,
+        isActive: admin.isActive,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt
+      }
+    }));
   });
 
   app.get('/schools/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
