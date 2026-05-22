@@ -251,10 +251,13 @@ model Invoice {
   subtotal    Float
   discount    Float         @default(0)
   total       Float
+  balance     Float
   dueDate     DateTime
+  termId      String?
   student     Student      @relation(fields: [studentId], references: [id])
   school      School       @relation(fields: [schoolId], references: [id])
   createdAt   DateTime     @default(now())
+  allocations PaymentAllocation[]
 
   @@unique([schoolId, invoiceNo])
 }
@@ -270,6 +273,46 @@ model Payment {
   student       Student  @relation(fields: [studentId], references: [id])
   school        School   @relation(fields: [schoolId], references: [id])
   createdAt     DateTime @default(now())
+  unappliedAmount Float   @default(0)
+  allocations   PaymentAllocation[]
+  receipt       Receipt?
 
   @@unique([schoolId, reference])
+}
+
+
+model PaymentAllocation {
+  id        String   @id @default(cuid())
+  schoolId  String
+  paymentId String
+  invoiceId String
+  amount    Float
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([schoolId, paymentId])
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  schoolId  String
+  paymentId String   @unique
+  receiptNo String
+  reference String
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+
+  @@unique([schoolId, receiptNo])
+}
+
+model BulkInvoiceRun {
+  id             String   @id @default(cuid())
+  schoolId       String
+  termId         String
+  idempotencyKey String
+  createdCount   Int
+  createdAt      DateTime @default(now())
+
+  @@unique([schoolId, idempotencyKey])
 }
