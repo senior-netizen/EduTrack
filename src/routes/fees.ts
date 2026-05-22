@@ -1,7 +1,7 @@
 import { InvoiceStatus, Prisma } from '@prisma/client';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { err, ok } from '../utils/http';
+import { created, fail, mapZodIssues, ok } from '../utils/http';
 import { ensureStudentInSchool } from '../utils/schoolScope';
 
 const toMoney = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -62,7 +62,7 @@ export async function feeRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
     const schema = z.object({ studentId: z.string(), subtotal: z.number(), discount: z.number().default(0), dueDate: z.string() });
     const p = schema.safeParse(request.body);
-    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    if (!p.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(p.error.issues)));
     const studentCheck = await ensureStudentInSchool(app, reply, p.data.studentId, jwt.schoolId);
     if (!studentCheck.ok) return studentCheck.response;
 
@@ -132,7 +132,7 @@ export async function feeRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
     const schema = z.object({ studentId: z.string(), reference: z.string(), amount: z.number().positive(), method: z.string(), paidAt: z.string(), targetInvoiceIds: z.array(z.string()).optional(), overpaymentPolicy: z.enum(['HOLD_AS_CREDIT', 'REJECT']).default('HOLD_AS_CREDIT') });
     const p = schema.safeParse(request.body);
-    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    if (!p.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(p.error.issues)));
     const studentCheck = await ensureStudentInSchool(app, reply, p.data.studentId, jwt.schoolId);
     if (!studentCheck.ok) return studentCheck.response;
 
