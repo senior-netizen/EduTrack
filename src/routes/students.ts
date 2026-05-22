@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { StudentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { err, ok } from '../utils/http';
+import { ensureClassInSchool } from '../utils/schoolScope';
 
 export async function studentRoutes(app: FastifyInstance) {
   app.get('/students', { preHandler: [app.authenticate] }, async (request) => {
@@ -37,6 +38,9 @@ export async function studentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
 
     const jwt = request.user as any;
+    const classCheck = await ensureClassInSchool(app, reply, parsed.data.classId, jwt.schoolId);
+    if (!classCheck.ok) return classCheck.response;
+
     const year = new Date().getFullYear();
     const count = await app.prisma.student.count({ where: { schoolId: jwt.schoolId } });
     const studentId = `SCH-${year}-${String(count + 1).padStart(4, '0')}`;
