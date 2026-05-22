@@ -1,12 +1,12 @@
 import { FastifyInstance, FastifyReply } from 'fastify';
 import { JwtUser } from '../types/auth';
-import { err } from './http';
+import { fail } from './http';
 
 export const denyCrossSchool = (reply: FastifyReply, resource: string) =>
-  reply.code(403).send(err('FORBIDDEN', `${resource} belongs to another school`));
+  reply.code(403).send(fail('FORBIDDEN', `${resource} belongs to another school`));
 
 export const notFound = (reply: FastifyReply, resource: string) =>
-  reply.code(404).send(err('NOT_FOUND', `${resource} not found`));
+  reply.code(404).send(fail('NOT_FOUND', `${resource} not found`));
 
 export async function ensureClassInSchool(app: FastifyInstance, reply: FastifyReply, classId: string, schoolId: string) {
   const klass = await app.prisma.class.findUnique({ where: { id: classId }, select: { id: true, schoolId: true, classTeacherId: true } });
@@ -45,13 +45,13 @@ export async function ensureExamPaperInExam(app: FastifyInstance, reply: Fastify
 
 export async function ensureTeacherCanAccessClass(reply: FastifyReply, jwt: JwtUser, classTeacherId: string | null) {
   if (jwt.role !== 'TEACHER') return { ok: true as const };
-  if (classTeacherId !== jwt.userId) return { ok: false as const, response: reply.code(403).send(err('FORBIDDEN', 'Teachers can only access their own class')) };
+  if (classTeacherId !== jwt.userId) return { ok: false as const, response: reply.code(403).send(fail('FORBIDDEN', 'Teachers can only access their own class')) };
   return { ok: true as const };
 }
 
 export async function ensureTeacherCanAccessSubjectForClass(app: FastifyInstance, reply: FastifyReply, jwt: JwtUser, classId: string, subjectId: string) {
   if (jwt.role !== 'TEACHER') return { ok: true as const };
   const assignment = await app.prisma.classSubject.findFirst({ where: { schoolId: jwt.schoolId!, classId, subjectId, teacherId: jwt.userId }, select: { id: true } });
-  if (!assignment) return { ok: false as const, response: reply.code(403).send(err('FORBIDDEN', 'Teachers can only submit results for their own subject assignment')) };
+  if (!assignment) return { ok: false as const, response: reply.code(403).send(fail('FORBIDDEN', 'Teachers can only submit results for their own subject assignment')) };
   return { ok: true as const };
 }

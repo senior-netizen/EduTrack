@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { err, ok } from '../utils/http';
+import { created, fail, mapZodIssues, ok } from '../utils/http';
 import { ensureClassInSchool } from '../utils/schoolScope';
 
 const studentReadRoles = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER', 'HOD', 'TEACHER', 'BURSAR'] as const;
@@ -149,7 +149,7 @@ export async function studentRoutes(app: FastifyInstance) {
       },
       include: { class: true }
     });
-    return reply.code(201).send(ok({
+    return reply.code(201).send(created({
       id: created.id,
       studentId: created.studentId,
       firstName: created.firstName,
@@ -164,7 +164,7 @@ export async function studentRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const jwt = request.user as any;
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId }, include: { guardians: true, class: true } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
 
     return ok({
       id: s.id,
@@ -196,7 +196,7 @@ export async function studentRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
 
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
 
     if (body.classId) {
       const classCheck = await ensureClassInSchool(app, reply, body.classId, jwt.schoolId);
@@ -220,12 +220,12 @@ export async function studentRoutes(app: FastifyInstance) {
   app.post('/students/:id/status', { preHandler: [app.authenticate, app.authorize([...studentWriteRoles])] }, async (request, reply) => {
     const schema = z.object({ status: z.enum(['ACTIVE','SUSPENDED','TRANSFERRED','WITHDRAWN','GRADUATED']), reason: z.string().optional(), effectiveDate: z.string().optional() });
     const parsed = schema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
 
     const { id } = request.params as { id: string };
     const jwt = request.user as any;
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
 
     const updated = await app.prisma.student.update({ where: { id: s.id }, data: { status: parsed.data.status } });
     return ok({ id: updated.id, status: updated.status, transferLetterUrl: updated.status === 'TRANSFERRED' ? `https://example.invalid/transfer-letter-${updated.studentId}.pdf` : null });

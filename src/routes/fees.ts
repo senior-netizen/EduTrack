@@ -1,7 +1,7 @@
 import { InvoiceStatus } from '@prisma/client';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { err, ok } from '../utils/http';
+import { created, fail, mapZodIssues, ok } from '../utils/http';
 import { ensureStudentInSchool } from '../utils/schoolScope';
 
 export async function feeRoutes(app: FastifyInstance) {
@@ -9,25 +9,25 @@ export async function feeRoutes(app: FastifyInstance) {
     const jwt = request.user as any;
     const schema = z.object({ studentId: z.string(), subtotal: z.number(), discount: z.number().default(0), dueDate: z.string() });
     const p = schema.safeParse(request.body);
-    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    if (!p.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(p.error.issues)));
     const studentCheck = await ensureStudentInSchool(app, reply, p.data.studentId, jwt.schoolId);
     if (!studentCheck.ok) return studentCheck.response;
 
     const total = p.data.subtotal - p.data.discount;
     const invoiceNo = `INV-${new Date().getFullYear()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
     const invoice = await app.prisma.invoice.create({ data: { schoolId: jwt.schoolId, studentId: p.data.studentId, invoiceNo, subtotal: p.data.subtotal, discount: p.data.discount, total, dueDate: new Date(p.data.dueDate), status: InvoiceStatus.ISSUED } });
-    return reply.code(201).send(ok(invoice));
+    return reply.code(201).send(created(invoice));
   });
 
   app.post('/payments', { preHandler: [app.authenticate, app.authorize(['BURSAR', 'SCHOOL_ADMIN'])] }, async (request, reply) => {
     const jwt = request.user as any;
     const schema = z.object({ studentId: z.string(), reference: z.string(), amount: z.number().positive(), method: z.string(), paidAt: z.string() });
     const p = schema.safeParse(request.body);
-    if (!p.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', p.error.issues));
+    if (!p.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(p.error.issues)));
     const studentCheck = await ensureStudentInSchool(app, reply, p.data.studentId, jwt.schoolId);
     if (!studentCheck.ok) return studentCheck.response;
 
     const pay = await app.prisma.payment.create({ data: { schoolId: jwt.schoolId, ...p.data, paidAt: new Date(p.data.paidAt) } });
-    return reply.code(201).send(ok(pay));
+    return reply.code(201).send(created(pay));
   });
 }
