@@ -23,6 +23,10 @@ Status is based on acceptance against `edutrack-api-contracts.md` (implemented s
 ## Known Remaining Gaps
 For the detailed gap breakdown and completion checklist, see [`implementation-gap-report.md`](implementation-gap-report.md).
 
+
+## Delivery & Traceability
+- [Implementation Traceability Matrix](implementation-traceability.md)
+
 ## API Base
 - `http://localhost:4000/api/v1`
 
