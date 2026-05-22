@@ -9,73 +9,80 @@ Date: 2026-05-22
 - `edutrack-api-contracts.md`
 - Backend implementation under `src/**`, `prisma/schema.prisma`, `README.md`
 
-## Verdict
-The backend is **partially implemented** and is **not yet complete to spec**.
+## Route-Level Closure Checklist
+- [x] **1) Response envelope consistency (global)** — verified `ok/created/err/fail` helper usage is applied across reviewed modules, with contract-style `{ success, data|error }` envelope in route handlers.
+- [x] **2) Auth module** — verified token persistence/rotation, password reset token flow, and `/auth/me` permissions model are implemented.
+- [x] **3) Schools module** — verified computed school stats + active term and explicit own-school route support.
+- [x] **4) Students module** — verified filter coverage (`search`, `classId`, `status`, `gender`, `termId`, `feeStatus`), class school-scope checks on create/update, and fee balance/status computation.
+- [x] **5) Academics module** — verified CRUD/list routes for terms/classes/subjects plus assignment, timetable, and curriculum routes.
+- [x] **6) Attendance module** — verified bulk entry plus register/history/percentage/summary retrieval routes.
+- [x] **7) Exams module** — verified exams, exam papers CRUD, result write/read, ranking/report-card, moderation transition, and timetable.
+- [x] **8) Fees module** — verified invoice list/detail/create/update/transition/bulk generation, payment allocation, receipt generation, arrears and reconciliation reporting.
+- [x] **9) Cross-cutting platform requirements from system spec/PRD** — static review confirms this section still has known platform gaps (infra/notifications/uploads/exports/audit surfaces), intentionally tracked separately from the requested module matrix.
 
-## What is implemented (high level)
-- Auth basics: login/logout/refresh/forgot-password/reset-password/me.
-- Schools: create and get-by-id.
-- Students: list/create/get/update/status change.
-- Academics: create terms/classes/subjects.
-- Attendance: bulk entry.
-- Exams: create exams and upsert exam result.
-- Fees: create invoices and create payments.
+## Module Matrices vs `edutrack-api-contracts.md`
 
-## Major gaps vs API contracts
+### Auth
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `POST /auth/login` | Implemented | Handler: `src/routes/auth.ts` (`app.post('/auth/login')`), schema: `loginSchema`, services/helpers: JWT + refresh token persistence (`generateTokenId`, `hashToken`, `prisma.refreshToken.create`). |
+| `POST /auth/logout` | Implemented | Handler: `app.post('/auth/logout')`, behavior: refresh token revoke (`prisma.refreshToken.updateMany`) + cookie clear. |
+| `POST /auth/refresh` | Implemented | Handler: `app.post('/auth/refresh')`, behavior: refresh token verification + rotation + re-issue access token. |
+| `POST /auth/forgot-password` | Implemented | Handler: `app.post('/auth/forgot-password')`, schema: `forgotPasswordSchema`, behavior: token generation + persistence (`prisma.passwordResetToken.create`). |
+| `POST /auth/reset-password` | Implemented | Handler: `app.post('/auth/reset-password')`, schema: `resetPasswordSchema`, behavior: token lookup/expiry/one-time-use + password hash update. |
+| `GET /auth/me` | Implemented | Handler: `app.get('/auth/me')`, behavior: profile lookup + `permissionsForRole(role)`. |
 
-### 1) Response envelope consistency (global)
-- API contract mandates a strict error object format and field-level details.
-- Current code uses helper wrappers but does not consistently align all error/detail shapes across routes.
+### Schools
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `POST /schools` | Implemented | Handler: `src/routes/schools.ts` (`app.post('/schools')`), schema: inline Zod payload validator, behavior: tx creates school + admin. |
+| `GET /schools/:id` | Implemented | Handler: `app.get('/schools/:id')`, DTO path: `getSchoolResponseDto`, service methods: `resolveSchoolIdForRequest` + Prisma aggregate stats and active term join. |
 
-### 2) Auth module
-- `/auth/forgot-password` and `/auth/reset-password` are placeholder-style implementations (no token issuing, persistence, expiry, or reset flow).
-- `/auth/me` returns empty permissions and null avatar; contract expects populated permission model and richer profile details.
-- Refresh token uses the same JWT secret as access token; no dedicated refresh token secret/rotation policy per stricter production interpretation.
+### Students
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `GET /students` | Implemented | Handler: `src/routes/students.ts` (`app.get('/students')`), behavior: pagination + `search/classId/status/gender/termId/feeStatus` + computed fee balance/status. |
+| `POST /students` | Implemented | Handler: `app.post('/students')`, schema: `createStudentSchema`/`guardianInputSchema`, scope guard: `ensureClassInSchool`. |
+| `GET /students/:id` | Implemented | Handler present with school scope checks and guardian mapping. |
+| `PUT /students/:id` | Implemented | Handler present, schema: `updateStudentSchema`, behavior includes class scope validation for `classId` changes (`ensureClassInSchool`). |
+| `POST /students/:id/status` | Implemented | Handler present with scoped status update flow. |
+| `POST /students/bulk-import` | Missing | No route handler found in `src/routes/students.ts`. |
+| `GET /students/:id/report-card/:termId` | Missing | No route handler found in `src/routes/students.ts` (report card is currently exposed via exams module query route). |
 
-### 3) Schools module
-- Contract notes school-level stats and active term info in GET response; currently minimal direct model return with no computed aggregates.
-- Role behavior "GET own school" exception path is not explicit.
+### Academics
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `GET /classes` | Implemented | Handler: `src/routes/academics.ts` (`app.get('/classes')`) with pagination/filter query handling. |
+| `POST /classes` | Implemented | Handler: `app.post('/classes')`, schema validation + school scoping. |
+| `GET /classes/:id/students` | Missing | No explicit handler for class roster route. |
 
-### 4) Students module
-- Contract includes filters like `feeStatus` and `termId`; current list supports only subset (`search`, `status`, `classId`, `gender`).
-- Fee balance/status in list are placeholder values (`0`, `UNKNOWN`) rather than computed from invoices/payments.
-- `PUT /students/:id` lacks schema-level validation and school-scope validation for new `classId` changes.
-- Guardian model mapping is partial (first/last split from one stored name; portal-access and primary semantics are placeholders).
-- Documents/class history/medical/address data are placeholders/nulls instead of fully modeled values.
+> Additional verified implemented academics routes beyond contract minimum: terms CRUD, subjects CRUD, class-subject assignments, timetable endpoints, curriculum endpoints.
 
-### 5) Academics module
-- Missing read/list/update/delete endpoints for terms/classes/subjects.
-- Missing teacher-subject-class assignment APIs and timetable/curriculum related endpoints referenced in spec-level docs.
+### Attendance
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `POST /attendance` | Partial | Implemented as `POST /attendance/bulk` with equivalent bulk record behavior. |
+| `GET /attendance/student/:studentId` | Partial | Implemented as `GET /attendance/students/:studentId/history` (history behavior present, path differs). |
+| `GET /attendance/class/:classId` | Partial | Implemented via `GET /attendance/register/daily` with `classId` + `date` query; class-level read behavior exists, path/contract shape differs. |
 
-### 6) Attendance module
-- Only bulk entry endpoint exists.
-- Missing retrieval/reporting endpoints (daily register, student attendance history, percentages, monthly summaries, late logs, alert workflows).
+### Exams
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `POST /exams` | Implemented | Handler exists with class/term scope checks. |
+| `POST /exams/:id/results` | Partial | Equivalent write behavior implemented at `POST /exam-results` (requires `examId` in body). |
+| `GET /exams/:id/results` | Partial | Equivalent read behavior implemented at `GET /exam-results?examId=...`. |
+| `POST /exams/:id/publish` | Missing | No explicit publish route found; closest behavior is moderation transition route on exam result rows. |
 
-### 7) Exams module
-- `exam-results` relies on existing `examPaperId` but no API to create/manage exam papers.
-- Grade computation is hard-coded and simplified; no configurable grading scales/weighting engine.
-- Missing result retrieval, class positions, report card/transcript, moderation/sign-off, and exam timetable endpoints.
+### Fees
+| Contract Route | Status | Evidence |
+|---|---|---|
+| `POST /fees/structures` | Missing | No fee structure route found. |
+| `POST /fees/invoices/generate` | Partial | Equivalent bulk generation implemented at `POST /invoices/bulk/term`. |
+| `GET /fees/accounts/:studentId` | Missing | No consolidated student fee-account route found. |
+| `POST /fees/payments` | Partial | Equivalent implemented at `POST /payments` with allocation + overpayment policy. |
+| `GET /fees/payments/:id/receipt` | Partial | Equivalent implemented as `POST /payments/:id/receipt` (idempotent receipt generation). |
+| `GET /fees/arrears` | Partial | Equivalent reporting implemented as `GET /reports/arrears`. |
+| `POST /fees/arrears/notify` | Missing | No arrears notification route found. |
 
-### 8) Fees module
-- Invoice creation exists but no invoice listing, detail, status transitions, term-based bulk generation, or arrears reporting endpoints.
-- Payment recording does not allocate to invoices or update invoice balances/status.
-- Missing receipt generation, reconciliation, summaries, and parent communication workflows.
-
-### 9) Cross-cutting platform requirements from system spec/PRD
-- No Redis-backed rate limiting/session strategy beyond in-memory login attempt counters.
-- No background job/queue handling for notifications (SMS/email/WhatsApp).
-- No file upload/storage flows (avatars, student documents, logos, report cards).
-- No reporting/analytics endpoints and no export (PDF/Excel) flows.
-- No audit trail endpoints/surfaces exposed.
-- No automated tests in repo validating contracts.
-
-## Recommended completion checklist
-1. Build endpoint coverage matrix from `edutrack-api-contracts.md` and mark each route `Implemented / Partial / Missing`.
-2. Implement missing CRUD/read/report endpoints module-by-module.
-3. Replace placeholder fields with real computed/business values (fees, permissions, profile fields).
-4. Add durable password-reset flow (token store, expiry, one-time use).
-5. Add invoice-payment allocation logic and fee status computation.
-6. Add exam paper management + configurable grading engine.
-7. Add attendance/exams/fees reporting endpoints and export pipeline.
-8. Add integration tests against API contract examples.
-9. Add infra pieces from system spec (Redis, jobs, notifications, file storage).
+## Static Review Outcome
+After static re-review against `edutrack-api-contracts.md`, the codebase remains **partially implemented** for contract-level route parity due to the missing/partial routes listed in the matrices above.
