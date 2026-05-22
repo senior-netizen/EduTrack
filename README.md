@@ -15,6 +15,10 @@ This project now implements a broad v1 backend surface aligned with:
 - Exams: create exam, upsert exam result
 - Fees: create invoices, record payments
 
+
+## Delivery & Traceability
+- [Implementation Traceability Matrix](implementation-traceability.md)
+
 ## API Base
 - `http://localhost:4000/api/v1`
 
