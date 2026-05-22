@@ -155,6 +155,10 @@ model Student {
   dateOfBirth    DateTime
   gender         String
   status         StudentStatus     @default(ACTIVE)
+  address        String?
+  medicalNotes   String?
+  documents      Json?
+  classHistory   Json?
   guardians      StudentGuardian[]
   attendance     AttendanceRecord[]
   examResults    ExamResult[]
@@ -173,8 +177,13 @@ model StudentGuardian {
   userId         String?
   parentUser     User?    @relation(fields: [userId], references: [id])
   guardianName   String
+  firstName      String
+  lastName       String
   guardianPhone  String
   relationship   String?
+  email          String?
+  isPrimary      Boolean  @default(false)
+  hasPortalAccess Boolean @default(false)
 }
 
 model AttendanceRecord {
