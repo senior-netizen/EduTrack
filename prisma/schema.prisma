@@ -190,6 +190,10 @@ model AttendanceRecord {
   student     Student          @relation(fields: [studentId], references: [id])
 
   @@unique([studentId, date])
+  @@index([schoolId, date])
+  @@index([schoolId, classId, date])
+  @@index([schoolId, studentId, date])
+  @@index([schoolId, termId, date])
 }
 
 model Exam {
