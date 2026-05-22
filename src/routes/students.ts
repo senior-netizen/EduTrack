@@ -1,13 +1,62 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { err, ok } from '../utils/http';
+import { created, fail, mapZodIssues, ok } from '../utils/http';
 import { ensureClassInSchool } from '../utils/schoolScope';
 
 const studentReadRoles = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER', 'HOD', 'TEACHER', 'BURSAR'] as const;
 const studentWriteRoles = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADMASTER'] as const;
 
+const updateStudentSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  gender: z.string().min(1).optional(),
+  dateOfBirth: z.string().optional(),
+  classId: z.string().min(1).optional()
+}).strict();
+
+const guardianInputSchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  relationship: z.string().optional(),
+  phone: z.string().min(5),
+  email: z.string().email().optional(),
+  isPrimary: z.boolean().optional(),
+  hasPortalAccess: z.boolean().optional()
+});
+
+const createStudentSchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  dateOfBirth: z.string(),
+  gender: z.string().min(1),
+  address: z.string().optional(),
+  medicalNotes: z.string().optional(),
+  classId: z.string().min(1),
+  enrollmentDate: z.string().optional(),
+  guardians: z.array(guardianInputSchema).min(1)
+});
+
+function computeFeeStatus(balance: number): 'PAID' | 'PARTIAL' | 'OVERDUE' {
+  if (balance <= 0) return 'PAID';
+  if (balance < 0.01) return 'PAID';
+  return 'OVERDUE';
+}
+
+function mapGuardian(g: any) {
+  return {
+    id: g.id,
+    firstName: g.firstName,
+    lastName: g.lastName,
+    relationship: g.relationship,
+    phone: g.guardianPhone,
+    email: g.email,
+    isPrimary: g.isPrimary,
+    hasPortalAccess: g.hasPortalAccess
+  };
+}
+
 export async function studentRoutes(app: FastifyInstance) {
-  app.get('/students', { preHandler: [app.authenticate, app.authorize([...studentReadRoles])] }, async (request) => {
+  app.get('/students', { preHandler: [app.authenticate, app.authorize([...studentReadRoles])] }, async (request, reply) => {
     const q = request.query as any;
     const page = Number(q.page ?? 1);
     const perPage = Math.min(Number(q.perPage ?? 25), 100);
@@ -19,51 +68,52 @@ export async function studentRoutes(app: FastifyInstance) {
     if (q.classId) where.classId = q.classId;
     if (q.gender) where.gender = q.gender;
 
+    if (q.termId) {
+      const term = await app.prisma.term.findFirst({ where: { id: q.termId, schoolId: jwt.schoolId } });
+      if (!term) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid termId'));
+      where.invoices = { some: { dueDate: { gte: term.startDate, lte: term.endDate } } };
+    }
+
     const [rows, total] = await Promise.all([
       app.prisma.student.findMany({ where, include: { guardians: true, class: true }, skip: (page - 1) * perPage, take: perPage, orderBy: { createdAt: 'desc' } }),
       app.prisma.student.count({ where })
     ]);
 
-    return ok(rows.map((s: any) => ({
-      id: s.id,
-      studentId: s.studentId,
-      firstName: s.firstName,
-      lastName: s.lastName,
-      fullName: `${s.firstName} ${s.lastName}`,
-      dateOfBirth: s.dateOfBirth.toISOString().slice(0, 10),
-      gender: s.gender,
-      photoUrl: null,
-      status: s.status,
-      currentClass: { id: s.class.id, name: s.class.name, grade: s.class.grade, stream: s.class.stream },
-      primaryGuardian: s.guardians[0]
-        ? { name: s.guardians[0].guardianName, phone: s.guardians[0].guardianPhone, relationship: s.guardians[0].relationship }
-        : null,
-      feeBalance: 0,
-      feeStatus: 'UNKNOWN',
-      enrollmentDate: s.createdAt.toISOString().slice(0, 10)
-    })), { page, perPage, total, totalPages: Math.ceil(total / perPage) });
+    const studentIds = rows.map((s: any) => s.id);
+    const [invoiceAgg, paymentAgg] = await Promise.all([
+      app.prisma.invoice.groupBy({ by: ['studentId'], where: { schoolId: jwt.schoolId, studentId: { in: studentIds } }, _sum: { total: true } }),
+      app.prisma.payment.groupBy({ by: ['studentId'], where: { schoolId: jwt.schoolId, studentId: { in: studentIds } }, _sum: { amount: true } })
+    ]);
+
+    const invoiceTotals = new Map(invoiceAgg.map((i: any) => [i.studentId, i._sum.total ?? 0]));
+    const paymentTotals = new Map(paymentAgg.map((p: any) => [p.studentId, p._sum.amount ?? 0]));
+
+    const mapped = rows.map((s: any) => {
+      const feeBalance = Number(invoiceTotals.get(s.id) ?? 0) - Number(paymentTotals.get(s.id) ?? 0);
+      const feeStatus = computeFeeStatus(feeBalance);
+      return {
+        id: s.id,
+        studentId: s.studentId,
+        firstName: s.firstName,
+        lastName: s.lastName,
+        fullName: `${s.firstName} ${s.lastName}`,
+        dateOfBirth: s.dateOfBirth.toISOString().slice(0, 10),
+        gender: s.gender,
+        photoUrl: null,
+        status: s.status,
+        currentClass: { id: s.class.id, name: s.class.name, grade: s.class.grade, stream: s.class.stream },
+        primaryGuardian: s.guardians.find((g: any) => g.isPrimary) ? mapGuardian(s.guardians.find((g: any) => g.isPrimary)) : (s.guardians[0] ? mapGuardian(s.guardians[0]) : null),
+        feeBalance,
+        feeStatus,
+        enrollmentDate: s.createdAt.toISOString().slice(0, 10)
+      };
+    }).filter((s: any) => !q.feeStatus || s.feeStatus === q.feeStatus);
+
+    return ok(mapped, { page, perPage, total: q.feeStatus ? mapped.length : total, totalPages: Math.ceil((q.feeStatus ? mapped.length : total) / perPage) });
   });
 
   app.post('/students', { preHandler: [app.authenticate, app.authorize([...studentWriteRoles])] }, async (request, reply) => {
-    const schema = z.object({
-      firstName: z.string().min(1),
-      lastName: z.string().min(1),
-      dateOfBirth: z.string(),
-      gender: z.string().min(1),
-      address: z.string().optional(),
-      medicalNotes: z.string().optional(),
-      classId: z.string().min(1),
-      enrollmentDate: z.string().optional(),
-      guardians: z.array(z.object({
-        firstName: z.string().min(1),
-        lastName: z.string().min(1),
-        relationship: z.string().optional(),
-        phone: z.string().min(5),
-        email: z.string().email().optional(),
-        isPrimary: z.boolean().optional()
-      })).min(1)
-    });
-    const parsed = schema.safeParse(request.body);
+    const parsed = createStudentSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
 
     const jwt = request.user as any;
@@ -86,15 +136,20 @@ export async function studentRoutes(app: FastifyInstance) {
         status: 'ACTIVE',
         guardians: {
           create: parsed.data.guardians.map((g: any) => ({
+            firstName: g.firstName,
+            lastName: g.lastName,
             guardianName: `${g.firstName} ${g.lastName}`,
             guardianPhone: g.phone,
-            relationship: g.relationship
+            relationship: g.relationship,
+            email: g.email,
+            isPrimary: g.isPrimary ?? false,
+            hasPortalAccess: g.hasPortalAccess ?? false
           }))
         }
       },
       include: { class: true }
     });
-    return reply.code(201).send(ok({
+    return reply.code(201).send(created({
       id: created.id,
       studentId: created.studentId,
       firstName: created.firstName,
@@ -109,7 +164,7 @@ export async function studentRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const jwt = request.user as any;
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId }, include: { guardians: true, class: true } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
 
     return ok({
       id: s.id,
@@ -120,14 +175,14 @@ export async function studentRoutes(app: FastifyInstance) {
       dateOfBirth: s.dateOfBirth.toISOString().slice(0, 10),
       gender: s.gender,
       photoUrl: null,
-      address: null,
-      medicalNotes: null,
+      address: s.address,
+      medicalNotes: s.medicalNotes,
       status: s.status,
       enrollmentDate: s.createdAt.toISOString().slice(0, 10),
       currentClass: { id: s.class.id, name: s.class.name, classTeacher: null },
-      guardians: s.guardians.map((g: any) => ({ id: g.id, firstName: g.guardianName.split(' ')[0], lastName: g.guardianName.split(' ').slice(1).join(' '), relationship: g.relationship, phone: g.guardianPhone, email: null, isPrimary: false, hasPortalAccess: false })),
-      classHistory: [],
-      documents: [],
+      guardians: s.guardians.map((g: any) => mapGuardian(g)),
+      classHistory: s.classHistory,
+      documents: s.documents,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt
     });
@@ -135,20 +190,27 @@ export async function studentRoutes(app: FastifyInstance) {
 
   app.put('/students/:id', { preHandler: [app.authenticate, app.authorize([...studentWriteRoles])] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as Record<string, unknown>;
+    const parsed = updateStudentSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    const body = parsed.data;
     const jwt = request.user as any;
 
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
+
+    if (body.classId) {
+      const classCheck = await ensureClassInSchool(app, reply, body.classId, jwt.schoolId);
+      if (!classCheck.ok) return classCheck.response;
+    }
 
     const updated = await app.prisma.student.update({
       where: { id: s.id },
       data: {
-        firstName: typeof body.firstName === 'string' ? body.firstName : undefined,
-        lastName: typeof body.lastName === 'string' ? body.lastName : undefined,
-        gender: typeof body.gender === 'string' ? body.gender : undefined,
-        dateOfBirth: typeof body.dateOfBirth === 'string' ? new Date(body.dateOfBirth) : undefined,
-        classId: typeof body.classId === 'string' ? body.classId : undefined
+        firstName: body.firstName,
+        lastName: body.lastName,
+        gender: body.gender,
+        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined,
+        classId: body.classId
       },
       include: { guardians: true, class: true }
     });
@@ -158,12 +220,12 @@ export async function studentRoutes(app: FastifyInstance) {
   app.post('/students/:id/status', { preHandler: [app.authenticate, app.authorize([...studentWriteRoles])] }, async (request, reply) => {
     const schema = z.object({ status: z.enum(['ACTIVE','SUSPENDED','TRANSFERRED','WITHDRAWN','GRADUATED']), reason: z.string().optional(), effectiveDate: z.string().optional() });
     const parsed = schema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(err('VALIDATION_ERROR', 'Invalid payload', parsed.error.issues));
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION_ERROR', 'Invalid payload', mapZodIssues(parsed.error.issues)));
 
     const { id } = request.params as { id: string };
     const jwt = request.user as any;
     const s = await app.prisma.student.findFirst({ where: { id, schoolId: jwt.schoolId } });
-    if (!s) return reply.code(404).send(err('NOT_FOUND', 'Student not found'));
+    if (!s) return reply.code(404).send(fail('NOT_FOUND', 'Student not found'));
 
     const updated = await app.prisma.student.update({ where: { id: s.id }, data: { status: parsed.data.status } });
     return ok({ id: updated.id, status: updated.status, transferLetterUrl: updated.status === 'TRANSFERRED' ? `https://example.invalid/transfer-letter-${updated.studentId}.pdf` : null });
