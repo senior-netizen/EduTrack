@@ -34,6 +34,14 @@ enum AttendanceStatus {
   EXCUSED
 }
 
+enum ModerationStatus {
+  DRAFT
+  SUBMITTED
+  REVIEWED
+  APPROVED
+  REJECTED
+}
+
 enum InvoiceStatus {
   DRAFT
   ISSUED
@@ -78,6 +86,8 @@ model User {
   lockedUntil          DateTime?
   lastLogin            DateTime?
   studentsAsParent     StudentGuardian[]
+  passwordResetTokens  PasswordResetToken[]
+  refreshTokens        RefreshToken[]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
@@ -155,6 +165,10 @@ model Student {
   dateOfBirth    DateTime
   gender         String
   status         StudentStatus     @default(ACTIVE)
+  address        String?
+  medicalNotes   String?
+  documents      Json?
+  classHistory   Json?
   guardians      StudentGuardian[]
   attendance     AttendanceRecord[]
   examResults    ExamResult[]
@@ -173,8 +187,13 @@ model StudentGuardian {
   userId         String?
   parentUser     User?    @relation(fields: [userId], references: [id])
   guardianName   String
+  firstName      String
+  lastName       String
   guardianPhone  String
   relationship   String?
+  email          String?
+  isPrimary      Boolean  @default(false)
+  hasPortalAccess Boolean @default(false)
 }
 
 model AttendanceRecord {
@@ -190,6 +209,10 @@ model AttendanceRecord {
   student     Student          @relation(fields: [studentId], references: [id])
 
   @@unique([studentId, date])
+  @@index([schoolId, date])
+  @@index([schoolId, classId, date])
+  @@index([schoolId, studentId, date])
+  @@index([schoolId, termId, date])
 }
 
 model Exam {
@@ -205,11 +228,40 @@ model Exam {
   createdAt   DateTime    @default(now())
 }
 
+model GradingScale {
+  id          String   @id @default(cuid())
+  schoolId    String
+  termId      String?
+  classId     String?
+  name        String
+  isDefault   Boolean  @default(false)
+  bands       GradingScaleBand[]
+  createdAt   DateTime @default(now())
+
+  @@index([schoolId, termId, classId])
+}
+
+model GradingScaleBand {
+  id             String   @id @default(cuid())
+  gradingScaleId String
+  minScore       Float
+  maxScore       Float
+  grade          String
+  points         Float?
+  remark         String?
+  gradingScale   GradingScale @relation(fields: [gradingScaleId], references: [id], onDelete: Cascade)
+}
+
 model ExamPaper {
   id          String    @id @default(cuid())
   examId      String
   subjectId   String
   maxMarks    Float
+  paperCode   String?
+  examDate    DateTime?
+  startTime   String?
+  endTime     String?
+  venue       String?
   exam        Exam      @relation(fields: [examId], references: [id])
   subject     Subject   @relation(fields: [subjectId], references: [id])
 
@@ -226,6 +278,10 @@ model ExamResult {
   grade       String?
   points      Float?
   remark      String?
+  moderationStatus ModerationStatus @default(DRAFT)
+  signedOffBy  String?
+  signedOffAt  DateTime?
+  weightedScore Float?
   exam        Exam     @relation(fields: [examId], references: [id])
   student     Student  @relation(fields: [studentId], references: [id])
 
@@ -251,10 +307,13 @@ model Invoice {
   subtotal    Float
   discount    Float         @default(0)
   total       Float
+  balance     Float
   dueDate     DateTime
+  termId      String?
   student     Student      @relation(fields: [studentId], references: [id])
   school      School       @relation(fields: [schoolId], references: [id])
   createdAt   DateTime     @default(now())
+  allocations PaymentAllocation[]
 
   @@unique([schoolId, invoiceNo])
 }
@@ -270,6 +329,46 @@ model Payment {
   student       Student  @relation(fields: [studentId], references: [id])
   school        School   @relation(fields: [schoolId], references: [id])
   createdAt     DateTime @default(now())
+  unappliedAmount Float   @default(0)
+  allocations   PaymentAllocation[]
+  receipt       Receipt?
 
   @@unique([schoolId, reference])
+}
+
+
+model PaymentAllocation {
+  id        String   @id @default(cuid())
+  schoolId  String
+  paymentId String
+  invoiceId String
+  amount    Float
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([schoolId, paymentId])
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  schoolId  String
+  paymentId String   @unique
+  receiptNo String
+  reference String
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+
+  @@unique([schoolId, receiptNo])
+}
+
+model BulkInvoiceRun {
+  id             String   @id @default(cuid())
+  schoolId       String
+  termId         String
+  idempotencyKey String
+  createdCount   Int
+  createdAt      DateTime @default(now())
+
+  @@unique([schoolId, idempotencyKey])
 }
