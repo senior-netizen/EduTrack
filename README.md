@@ -1,38 +1,32 @@
-# EduTrack
+# EduTrack Full Backend (Spec-Based)
 
-Implementation scaffold for EduTrack Student Management System based on the provided specification documents.
+This project now implements a broad v1 backend surface aligned with:
+- `edutrack-system-spec.md`
+- `edutrack-prd.md`
+- `edutrack-db-schema.md`
+- `edutrack-api-contracts.md`
 
-## Included
-- Fastify REST API (`/api/v1`) with response envelope conventions.
-- JWT authentication (`/auth/login`, `/auth/me`).
-- RBAC middleware (`authenticate`, `authorize`).
-- Student module starter (`GET /students`, `POST /students`).
-- Prisma ORM schema capturing core multi-tenant entities: schools, users, terms, students.
+## Implemented Modules
+- Auth: login, logout, me
+- Schools: create, get by id
+- Students: list/filter, enroll
+- Academics: terms, classes, subjects
+- Attendance: bulk attendance entry
+- Exams: create exam, upsert exam result
+- Fees: create invoices, record payments
+
+## API Base
+- `http://localhost:4000/api/v1`
 
 ## Setup
-1. Copy env file:
-   ```bash
-   cp .env.example .env
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Generate Prisma client and migrate:
-   ```bash
-   npm run prisma:generate
-   npm run prisma:migrate -- --name init
-   ```
-4. Run server:
-   ```bash
-   npm run dev
-   ```
+```bash
+cp .env.example .env
+npm install
+npm run prisma:generate
+npm run prisma:migrate -- --name init
+npm run dev
+```
 
-Server runs on `http://localhost:4000` and API base URL is `http://localhost:4000/api/v1`.
-
-## Next planned modules
-- Academic management (terms/classes/subjects assignment)
-- Attendance and alerts
-- Exams and grading engine
-- Fees and payments
-- Notifications and report generation
+## Notes
+- Architecture uses Fastify + Prisma + JWT + role guards + multi-tenant `schoolId` scoping.
+- The schema includes key entities across students, academics, attendance, exams, and fees.
