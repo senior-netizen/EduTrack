@@ -34,6 +34,14 @@ enum AttendanceStatus {
   EXCUSED
 }
 
+enum ModerationStatus {
+  DRAFT
+  SUBMITTED
+  REVIEWED
+  APPROVED
+  REJECTED
+}
+
 enum InvoiceStatus {
   DRAFT
   ISSUED
@@ -220,11 +228,40 @@ model Exam {
   createdAt   DateTime    @default(now())
 }
 
+model GradingScale {
+  id          String   @id @default(cuid())
+  schoolId    String
+  termId      String?
+  classId     String?
+  name        String
+  isDefault   Boolean  @default(false)
+  bands       GradingScaleBand[]
+  createdAt   DateTime @default(now())
+
+  @@index([schoolId, termId, classId])
+}
+
+model GradingScaleBand {
+  id             String   @id @default(cuid())
+  gradingScaleId String
+  minScore       Float
+  maxScore       Float
+  grade          String
+  points         Float?
+  remark         String?
+  gradingScale   GradingScale @relation(fields: [gradingScaleId], references: [id], onDelete: Cascade)
+}
+
 model ExamPaper {
   id          String    @id @default(cuid())
   examId      String
   subjectId   String
   maxMarks    Float
+  paperCode   String?
+  examDate    DateTime?
+  startTime   String?
+  endTime     String?
+  venue       String?
   exam        Exam      @relation(fields: [examId], references: [id])
   subject     Subject   @relation(fields: [subjectId], references: [id])
 
@@ -241,6 +278,10 @@ model ExamResult {
   grade       String?
   points      Float?
   remark      String?
+  moderationStatus ModerationStatus @default(DRAFT)
+  signedOffBy  String?
+  signedOffAt  DateTime?
+  weightedScore Float?
   exam        Exam     @relation(fields: [examId], references: [id])
   student     Student  @relation(fields: [studentId], references: [id])
 
