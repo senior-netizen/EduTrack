@@ -273,3 +273,32 @@ model Payment {
 
   @@unique([schoolId, reference])
 }
+
+
+model TimetableEntry {
+  id        String   @id @default(cuid())
+  schoolId  String
+  classId   String
+  subjectId String
+  teacherId String?
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  room      String?
+  createdAt DateTime @default(now())
+
+  @@index([schoolId, classId, dayOfWeek])
+}
+
+model CurriculumItem {
+  id         String   @id @default(cuid())
+  schoolId   String
+  classId    String
+  subjectId  String
+  termId     String?
+  topic      String
+  objectives String[]
+  createdAt  DateTime @default(now())
+
+  @@index([schoolId, classId, subjectId])
+}
